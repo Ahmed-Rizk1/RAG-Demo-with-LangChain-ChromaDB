@@ -2,7 +2,7 @@
 
 This project shows a minimal working setup for a Retrieval-Augmented Generation (RAG) system using LangChain, Chroma, and Streamlit.
 
-![Screenshot]('screenshot.png)
+![screenshot.png]('screenshot.png)
 
 ## Features
 
