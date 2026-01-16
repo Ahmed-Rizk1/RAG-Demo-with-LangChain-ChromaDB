@@ -1,0 +1,16 @@
+# General Settings
+APP_NAME: "RAG Demo"
+VERSION: "1.0.0"
+
+# Model Settings
+# OPENAI_API_KEY should be set in .env
+MODEL_NAME: "gpt-4o"
+EMBEDDING_MODEL: "text-embedding-3-small"
+
+# Vector Store
+PERSIST_DIRECTORY: "data/processed/chroma_db"
+COLLECTION_NAME: "rag_collection"
+
+# Data Processing
+CHUNK_SIZE: 1000
+CHUNK_OVERLAP: 200

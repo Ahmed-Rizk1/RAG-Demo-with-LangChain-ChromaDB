@@ -1,78 +1,73 @@
+import argparse
+import sys
 import os
-import streamlit as st
-from dotenv import load_dotenv
 
-from langchain.chains import create_history_aware_retriever, create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_community.vectorstores import Chroma
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+# Add src to path if needed (though running as module is better)
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-load_dotenv()
+from src.data.loader import load_documents
+from src.data.splitter import split_documents
+from src.retrieval.vector_store import create_vector_store
+from src.ui.streamlit_app import run_streamlit_app
 
-# Paths and setup
-current_dir = os.path.dirname(os.path.abspath(__file__))
-persistent_directory = os.path.join(current_dir, "db", "chroma_db_with_metadata")
+def ingest():
+    """Runs the data ingestion pipeline."""
+    print("Starting ingestion...")
+    docs = load_documents()
+    if not docs:
+        print("No documents found in data/raw/")
+        return
+    
+    print(f"Loaded {len(docs)} documents.")
+    chunks = split_documents(docs)
+    print(f"Split into {len(chunks)} chunks.")
+    
+    create_vector_store(chunks, reset=True)
+    print("Ingestion complete.")
 
-embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-db = Chroma(persist_directory=persistent_directory, embedding_function=embeddings)
+def run_app():
+    """Runs the Streamlit app."""
+    # This function is called by the streamlit runner, 
+    # but if we run this script directly with python, we need to spawn streamlit.
+    # However, standard way is `streamlit run main.py`.
+    # To support args with streamlit is tricky.
+    
+    # If this script is run by streamlit, `run_streamlit_app` is called.
+    run_streamlit_app()
 
-retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 3})
-llm = ChatOpenAI(model="gpt-4o")
+if __name__ == "__main__":
+    # Check if run via streamlit
+    # Streamlit sets the script name in sys.argv[0] usually or we check for streamlit env.
+    try:
+        import streamlit.web.bootstrap
+        is_streamlit = True
+    except ImportError:
+        is_streamlit = False
 
-# Prompts
-contextualize_q_prompt = ChatPromptTemplate.from_messages([
-    ("system", "Given a chat history and the latest user question "
-               "which might reference context in the chat history, "
-               "formulate a standalone question which can be understood "
-               "without the chat history. Do NOT answer the question, just "
-               "reformulate it if needed and otherwise return it as is."),
-    MessagesPlaceholder("chat_history"),
-    ("human", "{input}"),
-])
-
-history_aware_retriever = create_history_aware_retriever(
-    llm, retriever, contextualize_q_prompt
-)
-
-qa_prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are an assistant for question-answering tasks. Use "
-               "the following pieces of retrieved context to answer the "
-               "question. If you don't know the answer, just say that you "
-               "don't know. Use three sentences maximum and keep the answer "
-               "concise.\n\n{context}"),
-    MessagesPlaceholder("chat_history"),
-    ("human", "{input}"),
-])
-
-question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-
-# Streamlit UI
-st.set_page_config(page_title="RAG Chat", layout="wide")
-st.title("📚 RAG Chat with LangChain")
-
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-
-# Chat box
-user_input = st.chat_input("Ask a question")
-
-if user_input:
-    result = rag_chain.invoke({
-        "input": user_input,
-        "chat_history": st.session_state.chat_history
-    })
-
-    st.session_state.chat_history.append(HumanMessage(content=user_input))
-    st.session_state.chat_history.append(SystemMessage(content=result["answer"]))
-
-# Display chat history
-for msg in st.session_state.chat_history:
-    if isinstance(msg, HumanMessage):
-        with st.chat_message("user"):
-            st.markdown(msg.content)
+    # Simple logic: If arguments provided, behave as CLI. If not (or if run by streamlit), run app.
+    # But `streamlit run main.py` passes args to the script too.
+    
+    parser = argparse.ArgumentParser(description="RAG System Entry Point")
+    parser.add_argument("--ingest", action="store_true", help="Run data ingestion")
+    
+    # If running under streamlit, arguments might be weird, so we use parse_known_args
+    args, unknown = parser.parse_known_args()
+    
+    if args.ingest:
+        ingest()
     else:
-        with st.chat_message("assistant"):
-            st.markdown(msg.content)
+        # If run directly with python (not streamlit), we can tell user to run streamlit
+        # OR we can use subprocess to call streamlit.
+        # But commonly `streamlit run main.py` is the command.
+        
+        # We can detect if we are inside streamlit execution loop by checking `st.runtime.exists()`
+        try:
+             import streamlit as st
+             if st.runtime.exists():
+                 run_app()
+             else:
+                 # Not in streamlit, maybe user ran `python main.py`
+                 print("To run the app, use: streamlit run main.py")
+                 print("To ingest data, use: python main.py --ingest")
+        except:
+             print("To run the app, use: streamlit run main.py")
